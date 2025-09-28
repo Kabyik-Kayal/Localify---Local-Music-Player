@@ -4,9 +4,12 @@ from __future__ import annotations
 import json
 import os
 import threading
+import hashlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from PIL import Image, UnidentifiedImageError
 
 APP_FOLDER_NAME = "Localify"
 SETTINGS_FILE_NAME = "settings.json"
@@ -43,6 +46,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "playback": asdict(PlaybackState()),
     "track_positions": {},
     "folder_positions": {},
+    "folder_thumbnails": {},
 }
 
 
@@ -202,7 +206,67 @@ class SettingsManager:
                 if folder_str in items:
                     items.remove(folder_str)
             self._data.get("folder_positions", {}).pop(folder_str, None)
+            self._remove_thumbnail_entry(folder_str)
             self._save_locked()
+
+    # ------------------------------------------------------------------
+    # Playlist thumbnail helpers
+    # ------------------------------------------------------------------
+    def get_data_directory(self) -> Path:
+        return self._settings_path.parent
+
+    def get_folder_thumbnail(self, folder: Path) -> Optional[Path]:
+        folder_key = str(folder.resolve())
+        entry = self._data.get("folder_thumbnails", {}).get(folder_key)
+        if not entry:
+            return None
+        candidate = self.get_data_directory() / entry
+        return candidate if candidate.exists() else None
+
+    def set_folder_thumbnail(self, folder: Path, source_image: Path, max_size: int = 512) -> Path:
+        with self._lock:
+            folder_key = str(folder.resolve())
+            thumbnails_dir = self.get_data_directory() / "thumbnails"
+            thumbnails_dir.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha1(folder_key.encode("utf-8")).hexdigest()
+            ext = source_image.suffix.lower()
+            if ext not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+                ext = ".png"
+            target_path = thumbnails_dir / f"{digest}{ext}"
+
+            # Remove existing thumbnail if extension changes
+            existing_rel = self._data.get("folder_thumbnails", {}).get(folder_key)
+            if existing_rel:
+                existing_abs = self.get_data_directory() / existing_rel
+                if existing_abs.exists() and existing_abs != target_path:
+                    existing_abs.unlink(missing_ok=True)
+
+            try:
+                with Image.open(source_image) as image:
+                    image = image.convert("RGBA")
+                    image.thumbnail((max_size, max_size), Image.LANCZOS)
+                    image.save(target_path)
+            except UnidentifiedImageError as exc:  # pragma: no cover - user input
+                raise ValueError(f"Unsupported image file: {source_image}") from exc
+
+            relative_path = target_path.relative_to(self.get_data_directory())
+            self._data.setdefault("folder_thumbnails", {})[folder_key] = relative_path.as_posix()
+            self._save_locked()
+            return target_path
+
+    def remove_folder_thumbnail(self, folder: Path) -> None:
+        with self._lock:
+            folder_key = str(folder.resolve())
+            self._remove_thumbnail_entry(folder_key)
+            self._save_locked()
+
+    def _remove_thumbnail_entry(self, folder_key: str) -> None:
+        thumbnails = self._data.setdefault("folder_thumbnails", {})
+        rel_path = thumbnails.pop(folder_key, None)
+        if rel_path:
+            absolute = self.get_data_directory() / rel_path
+            if absolute.exists():
+                absolute.unlink(missing_ok=True)
 
 
 __all__ = ["SettingsManager", "WindowGeometry", "PlaybackState"]

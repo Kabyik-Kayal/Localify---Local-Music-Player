@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import List, Optional
 
 from PyQt6.QtCore import Qt, QFileSystemWatcher, QTimer
-from PyQt6.QtGui import QCursor, QDragEnterEvent, QDropEvent, QIcon, QKeySequence, QShortcut
+from PyQt6.QtGui import QCursor, QDragEnterEvent, QDropEvent, QIcon, QKeySequence, QShortcut, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -99,18 +100,47 @@ class MainWindow(QMainWindow):
 
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(12)
+        header_layout.setSpacing(16)
+
+        self._folder_thumbnail = QLabel(self)
+        self._folder_thumbnail.setFixedSize(140, 140)
+        self._folder_thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._folder_thumbnail.setStyleSheet(
+            "background-color: rgba(255, 255, 255, 0.04); border-radius: 12px; color: rgba(255, 255, 255, 0.6);"
+        )
+        self._folder_thumbnail.setText("Playlist\nCover")
+        self._folder_thumbnail.hide()
+        header_layout.addWidget(self._folder_thumbnail, 0, Qt.AlignmentFlag.AlignBottom)
+
+        info_layout = QVBoxLayout()
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        info_layout.setSpacing(8)
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(12)
 
         self._folder_label = QLabel("Select a folder to start", self)
         self._folder_label.setObjectName("heading")
         self._folder_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        header_layout.addWidget(self._folder_label, 1)
+        self._folder_label.setStyleSheet("font-size: 28px; font-weight: 700;")
+        title_row.addWidget(self._folder_label, 1)
+
+        self._set_thumbnail_button = QPushButton("Set Thumbnail", self)
+        title_row.addWidget(self._set_thumbnail_button)
 
         self._add_folder_button = QPushButton("Add Folder", self)
         self._add_folder_button.setObjectName("accent")
-        header_layout.addWidget(self._add_folder_button)
+        title_row.addWidget(self._add_folder_button)
+
+        info_layout.addLayout(title_row)
+        self._folder_meta_label = QLabel("", self)
+        self._folder_meta_label.setStyleSheet("color: rgba(255, 255, 255, 0.7); font-size: 13px;")
+        info_layout.addWidget(self._folder_meta_label, 0, Qt.AlignmentFlag.AlignLeft)
+        header_layout.addLayout(info_layout, 1)
 
         center_layout.addLayout(header_layout)
+        self._set_thumbnail_button.setEnabled(False)
 
         self._track_table = TrackTable(self)
         center_layout.addWidget(self._track_table, 1)
@@ -137,6 +167,8 @@ class MainWindow(QMainWindow):
         outer_layout.addWidget(controls_container)
 
         self.setCentralWidget(central)
+        self._set_playlist_header("Select a folder to start", "")
+        self._update_playlist_thumbnail(None)
 
     def _connect_signals(self) -> None:
         self._sidebar.folder_selected.connect(self._load_folder)
@@ -145,6 +177,7 @@ class MainWindow(QMainWindow):
         self._sidebar.folder_remove_requested.connect(self._remove_folder)
         self._sidebar.search_requested.connect(self._perform_search)
         self._add_folder_button.clicked.connect(self.add_folder_via_dialog)
+        self._set_thumbnail_button.clicked.connect(self._choose_playlist_thumbnail)
 
         self._track_table.track_activated.connect(self._play_track_at_index)
         self._track_table.track_context_menu.connect(self._show_track_context_menu)
@@ -213,13 +246,16 @@ class MainWindow(QMainWindow):
         playlist = self._folder_manager.get_folder(folder)
         if not playlist:
             QMessageBox.warning(self, "Folder not accessible", f"Unable to open {folder}")
+            self._update_playlist_thumbnail(None)
+            self._set_playlist_header("Select a folder to start", "")
             return
         self._current_playlist = playlist
+        self._update_playlist_thumbnail(playlist)
         self._update_folder_watch(playlist)
         self._display_tracks = playlist.tracks
         self._track_table.populate(self._display_tracks)
-        stats = f"{playlist.name} — {playlist.track_count} tracks • {format_duration(playlist.total_duration)}"
-        self._folder_label.setText(stats)
+        stats = f"{playlist.track_count} tracks • {format_duration(playlist.total_duration)}"
+        self._set_playlist_header(playlist.name, stats)
         self._settings.add_recent_folder(folder)
         self._settings.set_last_opened_folder(folder)
         self._refresh_sidebar()
@@ -239,6 +275,8 @@ class MainWindow(QMainWindow):
         if not playlist:
             self._clear_folder_watch()
             self._current_playlist = None
+            self._update_playlist_thumbnail(None)
+            self._set_playlist_header("Select a folder to start", "")
             return
 
         selected_paths = set()
@@ -253,8 +291,9 @@ class MainWindow(QMainWindow):
         self._display_tracks = playlist.tracks
         self._track_table.populate(self._display_tracks)
 
-        stats = f"{playlist.name} — {playlist.track_count} tracks • {format_duration(playlist.total_duration)}"
-        self._folder_label.setText(stats)
+        stats = f"{playlist.track_count} tracks • {format_duration(playlist.total_duration)}"
+        self._set_playlist_header(playlist.name, stats)
+        self._update_playlist_thumbnail(playlist)
 
         if selected_paths:
             for row, track_item in enumerate(self._display_tracks):
@@ -268,6 +307,68 @@ class MainWindow(QMainWindow):
                     if track_item.path == current_track.path:
                         self._track_table.selectRow(row)
                         break
+
+    def _set_playlist_header(self, title: str, subtitle: str = "") -> None:
+        self._folder_label.setText(title)
+        self._folder_meta_label.setText(subtitle)
+        self._folder_meta_label.setVisible(bool(subtitle))
+
+    def _update_playlist_thumbnail(self, playlist: Optional[FolderPlaylist]) -> None:
+        has_playlist = playlist is not None
+        self._set_thumbnail_button.setEnabled(has_playlist)
+
+        if not has_playlist:
+            self._folder_thumbnail.setPixmap(QPixmap())
+            self._folder_thumbnail.setText("Playlist\nCover")
+            self._folder_thumbnail.hide()
+            return
+
+        thumbnail_path = playlist.thumbnail
+        pixmap = QPixmap()
+        if thumbnail_path and thumbnail_path.exists():
+            pixmap = QPixmap(str(thumbnail_path))
+
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                self._folder_thumbnail.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._folder_thumbnail.setPixmap(scaled)
+            self._folder_thumbnail.setText("")
+        else:
+            self._folder_thumbnail.setPixmap(QPixmap())
+            self._folder_thumbnail.setText("Playlist\nCover")
+
+        self._folder_thumbnail.show()
+
+    def _choose_playlist_thumbnail(self) -> None:
+        if not self._current_playlist:
+            QMessageBox.information(self, "No playlist", "Select a playlist before setting a thumbnail.")
+            return
+
+        dialog_dir = str(self._current_playlist.path)
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Playlist Thumbnail",
+            dialog_dir,
+            "Image Files (*.png *.jpg *.jpeg *.bmp *.webp)",
+        )
+        if not file_path:
+            return
+
+        try:
+            stored_path = self._settings.set_folder_thumbnail(self._current_playlist.path, Path(file_path))
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid image", str(exc))
+            return
+        except OSError as exc:
+            QMessageBox.warning(self, "Unable to save thumbnail", str(exc))
+            return
+
+        self._folder_manager.update_thumbnail(self._current_playlist.path, stored_path)
+        self._current_playlist.thumbnail = stored_path
+        self._update_playlist_thumbnail(self._current_playlist)
 
     def _on_watched_directory_changed(self, _path: str) -> None:
         if not self._current_playlist:
@@ -317,9 +418,12 @@ class MainWindow(QMainWindow):
             if self._current_playlist:
                 self._display_tracks = self._current_playlist.tracks
                 self._track_table.populate(self._display_tracks)
-                self._folder_label.setText(
-                    f"{self._current_playlist.name} — {self._current_playlist.track_count} tracks • {format_duration(self._current_playlist.total_duration)}"
+                subtitle = (
+                    f"{self._current_playlist.track_count} tracks • {format_duration(self._current_playlist.total_duration)}"
                 )
+                self._set_playlist_header(self._current_playlist.name, subtitle)
+            else:
+                self._set_playlist_header("Select a folder to start", "")
             return
 
         results: List[TrackItem] = []
@@ -330,9 +434,10 @@ class MainWindow(QMainWindow):
         self._display_tracks = results
         self._track_table.populate(results)
         if results:
-            self._folder_label.setText(f"Search results for '{query}' ({len(results)} tracks)")
+            subtitle = f"{len(results)} track{'s' if len(results) != 1 else ''}"
+            self._set_playlist_header(f"Search results for '{query}'", subtitle)
         else:
-            self._folder_label.setText(f"No results for '{query}'")
+            self._set_playlist_header(f"No results for '{query}'", "")
 
     def _show_track_context_menu(self, index: int) -> None:
         if not self._display_tracks or index >= len(self._display_tracks):
@@ -417,7 +522,8 @@ class MainWindow(QMainWindow):
             self._current_playlist = None
             self._display_tracks = []
             self._track_table.setRowCount(0)
-            self._folder_label.setText("Select a folder to start")
+            self._set_playlist_header("Select a folder to start", "")
+            self._update_playlist_thumbnail(None)
 
     def add_folder_via_dialog(self) -> None:
         folder = FolderSelectionDialog.get_folder(self)

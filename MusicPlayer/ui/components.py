@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, List, Optional
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QPen
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QGridLayout,
@@ -233,9 +233,11 @@ class PlaybackControls(QWidget):
         layout.setSpacing(24)
 
         layout.addStretch(1)
+        layout.addSpacing(175)
 
         controls_row = QHBoxLayout()
         controls_row.setSpacing(12)
+        controls_row.addStretch(1)
 
         self.shuffle_button = self._create_icon_button(
             tooltip="Shuffle",
@@ -270,9 +272,12 @@ class PlaybackControls(QWidget):
             fallback_text="🔁",
             checkable=True,
         )
+        self._repeat_all_icon = QIcon.fromTheme("media-playlist-repeat")
+        self._repeat_one_icon = QIcon.fromTheme("media-playlist-repeat-one")
         self._current_repeat_mode_index = 0
         self.repeat_button.clicked.connect(self._cycle_repeat_mode)
         controls_row.addWidget(self.repeat_button)
+        controls_row.addStretch(1)
 
         layout.addLayout(controls_row)
         layout.addStretch(1)
@@ -408,18 +413,96 @@ class PlaybackControls(QWidget):
 
     def _update_repeat_button(self) -> None:
         mode = self.repeat_modes[self._current_repeat_mode_index]
-        labels = {
-            "off": ("🔁", "Repeat"),
-            "one": ("🔂", "Repeat One"),
-            "all": ("🔁", "Repeat All"),
+        tooltips = {
+            "off": "Repeat Off",
+            "one": "Repeat One",
+            "all": "Repeat All",
         }
-        icon_text, tooltip = labels[mode]
-        if self.repeat_button.icon().isNull():
-            self.repeat_button.setText(icon_text)
-        self.repeat_button.setToolTip(tooltip)
-        repeat_icon = QIcon.fromTheme("media-playlist-repeat-one" if mode == "one" else "media-playlist-repeat")
-        if not repeat_icon.isNull():
-            self.repeat_button.setIcon(repeat_icon)
+        fallback_text = {
+            "off": "OFF",
+            "one": "ONE",
+            "all": "ALL",
+        }
+        self.repeat_button.setToolTip(tooltips[mode])
+
+        icon_variants = self._build_repeat_icon_variants(mode)
+        if icon_variants:
+            self.repeat_button.setProperty("_icon_variants", icon_variants)
+            self.repeat_button.setIcon(icon_variants["active" if mode != "off" else "normal"])
+            self.repeat_button.setText("")
+        else:
+            self.repeat_button.setProperty("_icon_variants", None)
+            self.repeat_button.setIcon(QIcon())
+            self.repeat_button.setText(fallback_text[mode])
+            self._apply_text_button_style(self.repeat_button, mode != "off")
+
+        should_be_checked = mode != "off"
+        if self.repeat_button.isChecked() != should_be_checked:
+            was_blocked = self.repeat_button.blockSignals(True)
+            self.repeat_button.setChecked(should_be_checked)
+            self.repeat_button.blockSignals(was_blocked)
+
+        self._set_button_active(self.repeat_button, should_be_checked)
+
+    def _build_repeat_icon_variants(self, mode: str) -> Optional[dict[str, QIcon]]:
+        inactive_color = QColor("#B3B3B3")
+        active_color = QColor(ACCENT) if mode != "off" else inactive_color
+
+        icon_size = self.repeat_button.iconSize()
+        base_icon: Optional[QIcon]
+
+        if mode == "one" and not self._repeat_one_icon.isNull():
+            base_icon = self._repeat_one_icon
+        else:
+            base_icon = self._repeat_all_icon
+
+        if base_icon.isNull():
+            return None
+
+        use_badge = False
+        if mode == "one":
+            if self._repeat_one_icon.isNull():
+                use_badge = True
+            elif not self._repeat_all_icon.isNull() and base_icon.cacheKey() == self._repeat_all_icon.cacheKey():
+                use_badge = True
+
+        if mode == "one" and use_badge:
+            normal_icon = self._repeat_icon_with_badge(base_icon, inactive_color, icon_size, "1")
+            active_icon = self._repeat_icon_with_badge(base_icon, active_color, icon_size, "1")
+        else:
+            normal_icon = self._tinted_icon(base_icon, inactive_color, icon_size)
+            active_icon = self._tinted_icon(base_icon, active_color, icon_size)
+
+        return {"normal": normal_icon, "active": active_icon}
+
+    @staticmethod
+    def _repeat_icon_with_badge(base_icon: QIcon, tint: QColor, size: QSize, badge_text: str) -> QIcon:
+        tinted_icon = PlaybackControls._tinted_icon(base_icon, tint, size)
+        pixmap = tinted_icon.pixmap(size)
+        if pixmap.isNull():
+            return tinted_icon
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        diameter = max(12, int(min(size.width(), size.height()) * 0.45))
+        badge_rect = QRectF(pixmap.width() - diameter, pixmap.height() - diameter, diameter, diameter)
+        background = QColor("#121212")
+        background.setAlpha(230)
+        painter.setBrush(background)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(badge_rect)
+
+        pen = QPen(tint)
+        pen.setWidth(1)
+        painter.setPen(pen)
+        font: QFont = painter.font()
+        font.setBold(True)
+        font.setPointSize(max(6, int(diameter * 0.45)))
+        painter.setFont(font)
+        painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, badge_text)
+        painter.end()
+
+        return QIcon(pixmap)
 
     def _on_mute_clicked(self, checked: bool) -> None:
         self.set_muted(checked)
@@ -506,7 +589,7 @@ class NowPlayingWidget(QWidget):
         layout.setSpacing(10)
 
         self._artwork = QLabel(self)
-        self._artwork.setFixedSize(220, 220)
+        self._artwork.setFixedSize(280, 280)
         self._artwork.setStyleSheet("background-color: rgba(255, 255, 255, 0.05); border-radius: 10px;")
         self._artwork.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._artwork)
@@ -527,6 +610,8 @@ class NowPlayingWidget(QWidget):
 
         self._queue_list = QListWidget(self)
         self._queue_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._queue_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._queue_list.setTextElideMode(Qt.TextElideMode.ElideRight)
         self._queue_list.itemActivated.connect(self._on_queue_item_activated)
         layout.addWidget(self._queue_list, 1)
         self._queue_tracks: List[TrackItem] = []

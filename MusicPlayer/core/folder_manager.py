@@ -36,6 +36,7 @@ class FolderPlaylist:
     tracks: List[TrackItem] = field(default_factory=list)
     total_duration: float = 0.0
     subfolders: List[Path] = field(default_factory=list)
+    thumbnail: Optional[Path] = None
 
     @property
     def name(self) -> str:
@@ -131,7 +132,7 @@ class FolderManager:
             entries = sorted(folder.iterdir())
         except OSError as exc:
             LOGGER.warning("Unable to access folder %s: %s", folder, exc)
-            playlist = FolderPlaylist(path=folder)
+            playlist = FolderPlaylist(path=folder, thumbnail=self._settings.get_folder_thumbnail(folder))
             self._folder_cache[folder] = playlist
             return playlist
 
@@ -150,9 +151,21 @@ class FolderManager:
             except Exception as exc:  # pragma: no cover - defensive
                 LOGGER.exception("Failed to read metadata for %s: %s", entry, exc)
 
-        playlist = FolderPlaylist(path=folder, tracks=tracks, total_duration=total_duration, subfolders=subfolders)
+        playlist = FolderPlaylist(
+            path=folder,
+            tracks=tracks,
+            total_duration=total_duration,
+            subfolders=subfolders,
+            thumbnail=self._settings.get_folder_thumbnail(folder),
+        )
         self._folder_cache[folder] = playlist
         return playlist
+
+    def update_thumbnail(self, folder: Path, thumbnail: Optional[Path]) -> None:
+        resolved = folder.resolve()
+        playlist = self._folder_cache.get(resolved)
+        if playlist:
+            playlist.thumbnail = thumbnail
 
 
 __all__ = ["FolderManager", "FolderPlaylist", "TrackItem"]

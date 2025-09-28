@@ -59,9 +59,9 @@ class AudioPlayer(QObject):
         last_position = self._settings.get_track_position(track.path)
         self.play_track(track, start_position=last_position)
 
-    def play_track(self, track: TrackItem, start_position: float = 0.0) -> None:
+    def play_track(self, track: TrackItem, start_position: float = 0.0, *, force_restart: bool = False) -> None:
         self._ensure_mixer()
-        if start_position <= 0.0:
+        if start_position <= 0.0 and not force_restart:
             saved_position = self._settings.get_track_position(track.path)
             if saved_position > 0.0:
                 start_position = saved_position
@@ -74,6 +74,8 @@ class AudioPlayer(QObject):
         try:
             playback_path = self._equalizer.prepare_track(track.path, self._playback_state.eq_preset)
             self._active_audio_path = playback_path
+            if force_restart:
+                self._settings.remember_track_position(track.path, 0.0)
             pygame.mixer.music.load(playback_path.as_posix())
             fade_in_ms = int(max(self._playback_state.crossfade_seconds - 0.5, 0) * 1000)
             pygame.mixer.music.play(loops=0, start=start_position, fade_ms=fade_in_ms)
@@ -258,7 +260,7 @@ class AudioPlayer(QObject):
             return
         self.position_changed.emit(current_pos, self._current_track.metadata.duration_seconds)
         if self._playback_state.repeat_mode == "one":
-            self.play_track(self._current_track)
+            self.play_track(self._current_track, start_position=0.0, force_restart=True)
         else:
             self.next_track()
 
