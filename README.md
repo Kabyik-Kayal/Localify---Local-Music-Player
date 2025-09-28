@@ -2,7 +2,7 @@
 
 Localify is a lean, dark-themed desktop music player that treats folders as playlists. It focuses on fast local playback, a clean UI, and intuitive folder-based library management — inspired by Spotify’s layout, but built for files you own.
 
-![Localify preview](Assets/preview.png "Localify main window preview")
+![Localify preview](Assets/Preview.png "Localify main window preview")
 
 Why choose Localify?
 - Elegant, responsive three-panel UI (library / tracks / now playing)
