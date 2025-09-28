@@ -57,11 +57,41 @@ MAIN_STYLESHEET = textwrap.dedent(
     }}
     QScrollBar:vertical {{
         background: transparent;
-        width: 10px;
+        width: 12px;
+        margin: 4px 2px 4px 0px;
+    }}
+    QScrollBar:horizontal {{
+        background: transparent;
+        height: 12px;
+        margin: 0px 4px 2px 4px;
     }}
     QScrollBar::handle:vertical {{
-        background: rgba(255, 255, 255, 0.2);
-        border-radius: 4px;
+        background: {ACCENT};
+        border-radius: 6px;
+        min-height: 36px;
+    }}
+    QScrollBar::handle:horizontal {{
+        background: {ACCENT};
+        border-radius: 6px;
+        min-width: 36px;
+    }}
+    QScrollBar::handle:vertical:hover,
+    QScrollBar::handle:horizontal:hover {{
+        background: #1ed760;
+    }}
+    QScrollBar::add-line:vertical,
+    QScrollBar::sub-line:vertical,
+    QScrollBar::add-line:horizontal,
+    QScrollBar::sub-line:horizontal {{
+        background: none;
+        border: none;
+    }}
+    QScrollBar::add-page:vertical,
+    QScrollBar::sub-page:vertical,
+    QScrollBar::add-page:horizontal,
+    QScrollBar::sub-page:horizontal {{
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
     }}
     QSlider::groove:horizontal {{
         border: none;

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import List, Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QFileSystemWatcher, QTimer
 from PyQt6.QtGui import QCursor, QDragEnterEvent, QDropEvent, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
@@ -51,6 +51,15 @@ class MainWindow(QMainWindow):
         self._current_playlist: Optional[FolderPlaylist] = None
         self._display_tracks: List[TrackItem] = []
         self._tray_icon: Optional[QSystemTrayIcon] = None
+
+        self._folder_watcher = QFileSystemWatcher(self)
+        self._folder_watcher.directoryChanged.connect(self._on_watched_directory_changed)
+        self._folder_watcher.fileChanged.connect(self._on_watched_directory_changed)
+        self._watched_paths: List[str] = []
+        self._watch_reload_timer = QTimer(self)
+        self._watch_reload_timer.setSingleShot(True)
+        self._watch_reload_timer.setInterval(750)
+        self._watch_reload_timer.timeout.connect(self._reload_current_folder)
 
         self._build_ui()
         self._connect_signals()
@@ -206,6 +215,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Folder not accessible", f"Unable to open {folder}")
             return
         self._current_playlist = playlist
+        self._update_folder_watch(playlist)
         self._display_tracks = playlist.tracks
         self._track_table.populate(self._display_tracks)
         stats = f"{playlist.name} — {playlist.track_count} tracks • {format_duration(playlist.total_duration)}"
@@ -220,6 +230,77 @@ class MainWindow(QMainWindow):
                 if track_item.path == track_path:
                     self._track_table.selectRow(row)
                     break
+
+    def _reload_current_folder(self) -> None:
+        if not self._current_playlist:
+            return
+        folder = self._current_playlist.path
+        playlist = self._folder_manager.get_folder(folder, use_cache=False)
+        if not playlist:
+            self._clear_folder_watch()
+            self._current_playlist = None
+            return
+
+        selected_paths = set()
+        selection_model = self._track_table.selectionModel()
+        if selection_model:
+            for index in selection_model.selectedRows():
+                if 0 <= index.row() < len(self._display_tracks):
+                    selected_paths.add(self._display_tracks[index.row()].path)
+
+        self._current_playlist = playlist
+        self._update_folder_watch(playlist)
+        self._display_tracks = playlist.tracks
+        self._track_table.populate(self._display_tracks)
+
+        stats = f"{playlist.name} — {playlist.track_count} tracks • {format_duration(playlist.total_duration)}"
+        self._folder_label.setText(stats)
+
+        if selected_paths:
+            for row, track_item in enumerate(self._display_tracks):
+                if track_item.path in selected_paths:
+                    self._track_table.selectRow(row)
+                    break
+        else:
+            current_track = self._player.current_track()
+            if current_track:
+                for row, track_item in enumerate(self._display_tracks):
+                    if track_item.path == current_track.path:
+                        self._track_table.selectRow(row)
+                        break
+
+    def _on_watched_directory_changed(self, _path: str) -> None:
+        if not self._current_playlist:
+            return
+        self._watch_reload_timer.start()
+
+    def _update_folder_watch(self, playlist: FolderPlaylist) -> None:
+        if not playlist:
+            return
+        if self._watched_paths:
+            self._folder_watcher.removePaths(self._watched_paths)
+            self._watched_paths = []
+
+        paths = [str(playlist.path)]
+        for subfolder in playlist.subfolders:
+            if subfolder.exists():
+                paths.append(str(subfolder))
+
+        existing_paths = [path for path in paths if Path(path).exists()]
+        if not existing_paths:
+            return
+
+        failed = self._folder_watcher.addPaths(existing_paths)
+        if failed:
+            existing_paths = [path for path in existing_paths if path not in failed]
+        self._watched_paths = existing_paths
+
+    def _clear_folder_watch(self) -> None:
+        if self._watched_paths:
+            self._folder_watcher.removePaths(self._watched_paths)
+            self._watched_paths = []
+        if self._watch_reload_timer.isActive():
+            self._watch_reload_timer.stop()
 
     def _play_track_at_index(self, index: int) -> None:
         if not self._display_tracks or index >= len(self._display_tracks):
@@ -332,6 +413,7 @@ class MainWindow(QMainWindow):
         self._refresh_sidebar()
         if self._current_playlist and self._current_playlist.path == folder:
             self._player.stop()
+            self._clear_folder_watch()
             self._current_playlist = None
             self._display_tracks = []
             self._track_table.setRowCount(0)

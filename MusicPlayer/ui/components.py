@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QGridLayout,
@@ -27,7 +27,58 @@ from PyQt6.QtWidgets import (
 
 from PIL.ImageQt import ImageQt
 
+PROGRESS_SLIDER_STYLE = """
+QSlider::groove:horizontal {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+}
+QSlider::sub-page:horizontal {
+    background: #1DB954;
+    border-radius: 4px;
+}
+QSlider::add-page:horizontal {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 4px;
+}
+QSlider::handle:horizontal {
+    background: #ffffff;
+    width: 12px;
+    margin: -3px 0;
+    border-radius: 6px;
+}
+QSlider::handle:horizontal:hover {
+    background: #1ed760;
+}
+"""
+
+VOLUME_SLIDER_STYLE = """
+QSlider::groove:horizontal {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+QSlider::sub-page:horizontal {
+    background: #1DB954;
+    border-radius: 4px;
+}
+QSlider::add-page:horizontal {
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 4px;
+}
+QSlider::handle:horizontal {
+    background: #ffffff;
+    width: 10px;
+    margin: -2px 0;
+    border-radius: 5px;
+}
+QSlider::handle:horizontal:hover {
+    background: #1ed760;
+}
+"""
+
 from ..core.folder_manager import TrackItem
+from ..resources.styles import ACCENT
 from ..utils.helpers import format_duration
 
 
@@ -243,6 +294,7 @@ class PlaybackControls(QWidget):
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(80)
         self.volume_slider.setFixedWidth(140)
+        self.volume_slider.setStyleSheet(VOLUME_SLIDER_STYLE)
         self.volume_slider.valueChanged.connect(lambda value: self.volume_changed.emit(value / 100.0))
         volume_row.addWidget(self.volume_slider)
 
@@ -267,6 +319,7 @@ class PlaybackControls(QWidget):
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.setToolTip(tooltip)
         button.setIconSize(QSize(26, 26))
+
         icon = QIcon()
         if theme_icon:
             theme = QIcon.fromTheme(theme_icon)
@@ -274,10 +327,29 @@ class PlaybackControls(QWidget):
                 icon = theme
         if icon.isNull() and standard_icon is not None:
             icon = self.style().standardIcon(standard_icon)
+
+        button.setStyleSheet("QToolButton { background: transparent; border: none; }")
+
         if not icon.isNull():
-            button.setIcon(icon)
+            icon_variants = {
+                "normal": self._tinted_icon(icon, QColor("#FFFFFF"), button.iconSize()),
+                "active": self._tinted_icon(icon, QColor(ACCENT), button.iconSize()),
+            }
+            button.setProperty("_icon_variants", icon_variants)
+            button.setIcon(icon_variants["normal"])
         else:
+            button.setProperty("_icon_variants", None)
             button.setText(fallback_text or tooltip)
+            self._apply_text_button_style(button, active=False)
+
+        button.pressed.connect(lambda b=button: self._set_button_active(b, True))
+        button.released.connect(lambda b=button: self._set_button_active(b, b.isCheckable() and b.isChecked()))
+        if checkable:
+            button.toggled.connect(lambda checked, b=button: self._set_button_active(b, checked))
+        else:
+            button.toggled.connect(lambda _checked, b=button: self._set_button_active(b, False))
+        self._set_button_active(button, checkable and button.isChecked())
+
         return button
 
     def _create_play_button(self) -> QPushButton:
@@ -314,9 +386,17 @@ class PlaybackControls(QWidget):
         self.mute_button.blockSignals(True)
         self.mute_button.setChecked(muted)
         if not self._volume_icon.isNull() and not self._muted_icon.isNull():
-            self.mute_button.setIcon(self._muted_icon if muted else self._volume_icon)
+            base_icon = self._muted_icon if muted else self._volume_icon
+            icon_variants = {
+                "normal": self._tinted_icon(base_icon, QColor("#FFFFFF"), self.mute_button.iconSize()),
+                "active": self._tinted_icon(base_icon, QColor(ACCENT), self.mute_button.iconSize()),
+            }
+            self.mute_button.setProperty("_icon_variants", icon_variants)
         else:
+            self.mute_button.setProperty("_icon_variants", None)
             self.mute_button.setText("🔇" if muted else "🔊")
+            self._apply_text_button_style(self.mute_button, muted)
+        self._set_button_active(self.mute_button, muted)
         self.mute_button.setToolTip("Unmute" if muted else "Mute")
         self.mute_button.blockSignals(False)
 
@@ -345,6 +425,32 @@ class PlaybackControls(QWidget):
         self.set_muted(checked)
         self.mute_toggled.emit(checked)
 
+    def _set_button_active(self, button: QToolButton, active: bool) -> None:
+        icon_variants = button.property("_icon_variants")
+        if icon_variants:
+            button.setIcon(icon_variants["active" if active else "normal"])
+        else:
+            self._apply_text_button_style(button, active)
+
+    @staticmethod
+    def _apply_text_button_style(button: QToolButton, active: bool) -> None:
+        color = ACCENT if active else "#FFFFFF"
+        button.setStyleSheet(
+            f"QToolButton {{ color: {color}; background: transparent; border: none; }}"
+        )
+
+    @staticmethod
+    def _tinted_icon(icon: QIcon, color: QColor, size: QSize) -> QIcon:
+        pixmap = icon.pixmap(size)
+        if pixmap.isNull():
+            return icon
+        image = pixmap.toImage()
+        painter = QPainter(image)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(image.rect(), color)
+        painter.end()
+        return QIcon(QPixmap.fromImage(image))
+
 
 class ProgressWidget(QWidget):
     """Slider and labels representing track progress."""
@@ -364,6 +470,7 @@ class ProgressWidget(QWidget):
 
         self._slider = QSlider(Qt.Orientation.Horizontal, self)
         self._slider.setRange(0, 1000)
+        self._slider.setStyleSheet(PROGRESS_SLIDER_STYLE)
         self._slider.sliderReleased.connect(self._on_slider_released)
         layout.addWidget(self._slider, 0, 1)
 
