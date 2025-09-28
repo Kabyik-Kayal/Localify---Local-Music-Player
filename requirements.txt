@@ -1,0 +1,6 @@
+PyQt6>=6.6
+pygame>=2.5
+mutagen>=1.47
+Pillow>=10.0
+pathlib; python_version<'3.4'
+pydub>=0.25
