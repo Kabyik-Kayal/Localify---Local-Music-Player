@@ -1,34 +1,34 @@
-- MusicPlayer — Local Spotify-like Desktop
+# Localify — Local Spotify-like Desktop Player
 
 Localify is a lean, dark-themed desktop music player that treats folders as playlists. It focuses on fast local playback, a clean UI, and intuitive folder-based library management — inspired by Spotify’s layout, but built for files you own.
 
 ![Localify preview](Assets/Preview.png "Localify main window preview")
 
-Why choose Localify?
+## Why choose Localify?
 - Elegant, responsive three-panel UI (library / tracks / now playing)
 - Plays local audio files (MP3, WAV, FLAC, OGG, M4A) with metadata and album art
 - Folder-as-playlist model: add or drop folders; they become playlists instantly
 - Playback features: gapless/crossfade, shuffle, repeat, per-track position memory, and basic EQ presets
 
 ## Quick start
-1. Create and activate a virtual environment (recommended):
+### Windows
+1. **Install:**
+   - Double-click `install.bat` for a guided installation with progress bar and dialog. This will set up Python and dependencies if needed.
+2. **Run:**
+   - Double-click `run.bat` to launch Localify. The launcher auto-detects Python and virtual environments, and opens the app in a new window.
 
-   ```powershell
-   python -m venv .venv
-   .\.venv\Scripts\Activate.ps1
+### Linux/macOS
+1. **Install dependencies:**
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   python setup.py
    ```
-
-2. Install dependencies:
-
-   ```powershell
-   pip install -r requirements.txt
+2. **Run:**
+   ```bash
+   ./run.sh
    ```
-
-3. Run the app:
-
-   ```powershell
-   python -m MusicPlayer
-   ```
+   - The script auto-detects Python and virtual environments, launching the app via `python -m MusicPlayer`.
 
 ## Core features
 - Folder-based playlists (recursive scanning)
@@ -50,11 +50,15 @@ MusicPlayer/
 ├─ MusicPlayer/        # package
 ├─ requirements.txt
 ├─ setup.py
-├─ run.bat
+├─ run.bat            # Windows launcher
+├─ run.sh             # Linux/macOS launcher
+├─ install.bat        # Windows installer (progress bar)
 └─ README.md
 ```
 
 ## Tips & troubleshooting
+- **Windows:** If Python is missing, `install.bat` will download and install it automatically.
+- **Linux/macOS:** Ensure you have Python 3.8+ and all dependencies installed.
 - Audio not playing? Ensure `pygame` is installed and your audio device is available.
 - No album art? The file may not contain embedded artwork — try a tag editor.
 - Large libraries: initial scan can take time; metadata is cached for faster reloads.
